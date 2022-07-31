@@ -63,6 +63,12 @@ func main() {
 				continue
 			}
 
+			// TODO: make it configurable
+			if e.ip == "192.168.0.0" && e.netmask == 16 {
+				// reject
+				continue
+			}
+
 			prog, route := route("add", *interfaceName, e)
 			args := strings.Split(route, " ")
 			cmd := exec.Command(prog, args...)
