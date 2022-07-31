@@ -52,7 +52,9 @@ func main() {
 	go packetReader(p, ch)
 
 	// setup the inactivity RIP server timeout
-	noRipTimer := time.NewTimer(5 * time.Minute)
+	var lastUpdate time.Time
+	noRipTimer := time.NewTimer(1 * time.Minute)
+	defer noRipTimer.Stop()
 
 	for {
 		select {
@@ -78,12 +80,14 @@ func main() {
 				log.Printf("installed: %s %s", prog, route)
 				installed = append(installed, e)
 			}
-			noRipTimer.Stop()
-			noRipTimer = time.NewTimer(5 * time.Minute)
+			lastUpdate = time.Now()
 
 		case <-noRipTimer.C:
 			// cleanup installed routes
 			if len(installed) == 0 {
+				continue
+			}
+			if lastUpdate.Add(5 * time.Minute).After(time.Now()) {
 				continue
 			}
 
