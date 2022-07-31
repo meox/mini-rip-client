@@ -26,6 +26,7 @@ func main() {
 
 	interfaceName := flag.String("i", "eth0", "interface name")
 	port := flag.Uint("p", 520, "service port")
+	listenAddr := flag.String("l", "0.0.0.0", "listen address")
 	flag.Parse()
 
 	group := net.IPv4(224, 0, 0, 9)
@@ -34,9 +35,8 @@ func main() {
 		log.Fatalf("cannot find the interface: %v", err)
 	}
 
-	c, err := net.ListenPacket("udp4", fmt.Sprintf("0.0.0.0:%d", *port))
+	c, err := net.ListenPacket("udp4", fmt.Sprintf("%s:%d", *listenAddr, *port))
 	if err != nil {
-		// error handling
 		log.Fatalf("cannot listen: %v", err)
 	}
 	defer c.Close()
@@ -46,10 +46,12 @@ func main() {
 		log.Fatalf("cannot join: %v", err)
 	}
 
-	ch := make(chan entry)
+	ch := make(chan entry, 1)
 
+	// spawn the packet reader
 	go packetReader(p, ch)
 
+	// setup the inactivity RIP server timeout
 	noRipTimer := time.NewTimer(5 * time.Minute)
 
 	for {
