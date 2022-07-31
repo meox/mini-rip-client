@@ -53,8 +53,6 @@ func main() {
 
 	// setup the inactivity RIP server timeout
 	var lastUpdate time.Time
-	noRipTimer := time.NewTimer(1 * time.Minute)
-	defer noRipTimer.Stop()
 
 	for {
 		select {
@@ -88,7 +86,7 @@ func main() {
 			}
 			lastUpdate = time.Now()
 
-		case <-noRipTimer.C:
+		case <-time.After(3 * time.Minute):
 			// cleanup installed routes
 			if len(installed) == 0 {
 				continue
