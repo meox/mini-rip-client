@@ -8,11 +8,14 @@ import (
 	"net"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
 	"golang.org/x/net/ipv4"
 )
+
+const RIP_ENTRY_BYTES = 5 * 4
 
 type entry struct {
 	ip      string
@@ -21,13 +24,24 @@ type entry struct {
 	metric  uint32
 }
 
+type routeEntry struct {
+	ip        string
+	prefixLen int
+}
+
 func main() {
 	var installed []entry
 
 	interfaceName := flag.String("i", "eth0", "interface name")
 	port := flag.Uint("p", 520, "service port")
 	listenAddr := flag.String("l", "0.0.0.0", "listen address")
+	rejectRouteP := flag.String("r", "", "routes to be rejected, separated by ';'")
 	flag.Parse()
+
+	rejectRoutes, err := parseRejectRoutes(rejectRouteP)
+	if err != nil {
+		log.Fatalf("cannot parse reject routs: %v", err)
+	}
 
 	group := net.IPv4(224, 0, 0, 9)
 	dev, err := net.InterfaceByName(*interfaceName)
@@ -57,13 +71,15 @@ func main() {
 	for {
 		select {
 		case e := <-ch:
-			if isAlreadyInstalled(installed, e) {
-				continue
+			for _, rr := range rejectRoutes {
+				if e.ip == rr.ip && e.netmask == rr.prefixLen {
+					// reject
+					log.Printf("reject route: %s/%d", e.ip, e.netmask)
+					continue
+				}
 			}
 
-			// TODO: make it configurable
-			if e.ip == "192.168.0.0" && e.netmask == 16 {
-				// reject
+			if isAlreadyInstalled(installed, e) {
 				continue
 			}
 
@@ -135,8 +151,15 @@ func packetReader(p *ipv4.PacketConn, ch chan<- entry) {
 		}
 
 		if b[0] == 0x02 && b[1] == 0x02 && b[2] == 0x00 && b[3] == 0x00 {
+			// integrity of the packet
+			packet := b[4:n]
+			if len(packet)%RIP_ENTRY_BYTES != 0 {
+				log.Print("invalid length: discard it")
+				continue
+			}
+
 			// rip packet: parse it
-			entries := parseRip(b[4:n])
+			entries := parseRip(packet)
 			for _, e := range entries {
 				e.srcAddr = srcAddr
 				ch <- e
@@ -149,18 +172,17 @@ func packetReader(p *ipv4.PacketConn, ch chan<- entry) {
 
 func parseRip(b []byte) []entry {
 	n := len(b)
-	entry_bytes := 5 * 4
-	max_entries := n / entry_bytes
-
+	max_entries := n / RIP_ENTRY_BYTES
 	entries := make([]entry, 0, max_entries)
 
-	for i := 0; i < n; i += entry_bytes {
+	for i := 0; i < n; i += RIP_ENTRY_BYTES {
 		family := binary.BigEndian.Uint16(b[i : i+2])
 		if family != 2 {
 			continue
 		}
-		ip := fmt.Sprintf("%d.%d.%d.%d", b[i+4], b[i+5], b[i+6], b[i+7])
-		netmask := fmt.Sprintf("%d.%d.%d.%d", b[i+8], b[i+9], b[i+10], b[i+11])
+
+		ip := toIp(b[i+4 : i+8])
+		netmask := toIp(b[i+8 : i+12])
 
 		stringMask := net.IPMask(net.ParseIP(netmask).To4())
 		prefixLen, _ := stringMask.Size()
@@ -185,6 +207,10 @@ func isAlreadyInstalled(installed []entry, e entry) bool {
 	}
 
 	return false
+}
+
+func toIp(b []byte) string {
+	return fmt.Sprintf("%d.%d.%d.%d", b[0], b[1], b[2], b[3])
 }
 
 func route(action string, interfaceName string, e entry) (string, string) {
@@ -219,4 +245,32 @@ func route(action string, interfaceName string, e entry) (string, string) {
 	}
 
 	return prog, ret
+}
+
+func parseRejectRoutes(rejectRouteP *string) ([]routeEntry, error) {
+	var rejectRoutes []routeEntry
+	if rejectRouteP == nil {
+		return rejectRoutes, nil
+	}
+
+	rejects := strings.Split(*rejectRouteP, ";")
+	for _, e := range rejects {
+		tks := strings.Split(e, "/")
+		var pLen int64 = 32
+
+		if len(tks) == 2 {
+			var err error
+			pLen, err = strconv.ParseInt(tks[1], 10, 32)
+			if err != nil {
+				return []routeEntry{}, err
+			}
+		}
+
+		rejectRoutes = append(rejectRoutes, routeEntry{
+			ip:        tks[0],
+			prefixLen: int(pLen),
+		})
+	}
+
+	return rejectRoutes, nil
 }
