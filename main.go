@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"os/exec"
+	"os/signal"
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"golang.org/x/net/ipv4"
@@ -59,6 +62,16 @@ func main() {
 	if err := p.JoinGroup(dev, &net.UDPAddr{IP: group}); err != nil {
 		log.Fatalf("cannot join: %v", err)
 	}
+
+	sigChan := make(chan os.Signal)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigChan
+		log.Println("cleanup")
+		cleanUp(installed, *interfaceName)
+		log.Println("exiting")
+		os.Exit(1)
+	}()
 
 	ch := make(chan entry, 1)
 
@@ -112,17 +125,20 @@ func main() {
 			}
 
 			log.Print("Cleanup routes")
-			for _, e := range installed {
-				prog, route := route("del", *interfaceName, e)
-				args := strings.Split(route, " ")
-				cmd := exec.Command(prog, args...)
-				err := cmd.Run()
-				if err != nil {
-					log.Printf("cannot remove: %s %s, reason: %v", prog, route, err)
-				}
-			}
-
+			cleanUp(installed, *interfaceName)
 			installed = []entry{}
+		}
+	}
+}
+
+func cleanUp(installed []entry, interfaceName string) {
+	for _, e := range installed {
+		prog, route := route("del", interfaceName, e)
+		args := strings.Split(route, " ")
+		cmd := exec.Command(prog, args...)
+		err := cmd.Run()
+		if err != nil {
+			log.Printf("cannot remove: %s %s, reason: %v", prog, route, err)
 		}
 	}
 }
