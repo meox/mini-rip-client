@@ -144,30 +144,39 @@ func packetReader(p *ipv4.PacketConn, ch chan<- entry) {
 			continue
 		}
 
+		if !isRipV2(b) {
+			log.Printf("not rip-v2 packet: discard it")
+			continue
+		}
+
+		// integrity of the packet
+		packet := b[4:n]
+		if len(packet)%RIP_ENTRY_BYTES != 0 {
+			log.Print("invalid length: discard it")
+			continue
+		}
+
 		srcAddr, _, err := net.SplitHostPort(src.String())
 		if err != nil {
 			log.Printf("invalid src address: discard it")
 			continue
 		}
 
-		if b[0] == 0x02 && b[1] == 0x02 && b[2] == 0x00 && b[3] == 0x00 {
-			// integrity of the packet
-			packet := b[4:n]
-			if len(packet)%RIP_ENTRY_BYTES != 0 {
-				log.Print("invalid length: discard it")
-				continue
-			}
-
-			// rip packet: parse it
-			entries := parseRip(packet)
-			for _, e := range entries {
-				e.srcAddr = srcAddr
-				ch <- e
-			}
-		} else {
-			log.Printf("not rip-v2 packet: discard it")
+		// rip packet: parse it
+		entries := parseRip(packet)
+		for _, e := range entries {
+			e.srcAddr = srcAddr
+			ch <- e
 		}
 	}
+}
+
+func isRipV2(b []byte) bool {
+	if len(b) < 4 {
+		return false
+	}
+
+	return b[0] == 0x02 && b[1] == 0x02 && b[2] == 0x00 && b[3] == 0x00
 }
 
 func parseRip(b []byte) []entry {
