@@ -106,7 +106,7 @@ func main() {
 						log.Printf("already installed: %s", route)
 						installed = append(installed, e)
 					} else {
-						log.Printf("cannot install: %s, reason: %v", route, exitErr)
+						log.Printf("cannot install: %s %s, reason: %v", prog, route, exitErr)
 					}
 				}
 			} else {
@@ -180,6 +180,7 @@ func packetReader(p *ipv4.PacketConn, ch chan<- entry) {
 
 		// rip packet: parse it
 		entries := parseRip(packet)
+		log.Printf("received: %d entries", len(entries))
 		for _, e := range entries {
 			e.srcAddr = srcAddr
 			ch <- e
